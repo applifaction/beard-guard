@@ -39,9 +39,11 @@ def play_alarm():
     if not use_winsound and alarm_proc and alarm_proc.poll() is None:
         return
 
-    # Select random sound file
+    # Select random sound file; require at least one file
     sounds = list(ALARMS_DIR.glob("*.wav"))
-    alarm_path = random.choice(sounds) if sounds else BASE_DIR / "alarm.wav"
+    if not sounds:
+        return  # no alarm files available
+    alarm_path = random.choice(sounds)
 
     # Play depending on platform
     if use_winsound:
@@ -49,7 +51,7 @@ def play_alarm():
         alarm_proc = True
         # Auto-stop after 2 seconds
         def _stop_win():
-            time.sleep(2)
+            time.sleep(alarm_cooldown)
             winsound.PlaySound(None, winsound.SND_PURGE)
             global alarm_proc
             alarm_proc = None
@@ -59,7 +61,7 @@ def play_alarm():
         alarm_proc = proc
         # Auto-stop after 2 seconds
         def _stop_unix(p):
-            time.sleep(2)
+            time.sleep(alarm_cooldown)
             if p.poll() is None:
                 p.terminate()
             global alarm_proc
@@ -124,12 +126,12 @@ while True:
         idx_tip = hand_landmarks.landmark[8]
         hand_x, hand_y = int(idx_tip.x * w), int(idx_tip.y * h)
 
-        # Estimate face width
+        # Estimate face width using landmarks 234 (left) and 454 (right)
         left = face_landmarks.landmark[234]
         right = face_landmarks.landmark[454]
         face_width = abs(int((right.x - left.x) * w))
 
-        # Calculate distance
+        # Calculate distance between chin and fingertip
         dist = ((chin_x - hand_x)**2 + (chin_y - hand_y)**2) ** 0.5
         threshold = face_width * DISTANCE_THRESHOLD_FACTOR
 
@@ -138,6 +140,7 @@ while True:
         cv2.circle(frame, (hand_x, hand_y), 5, (0, 0, 255), -1)
         cv2.line(frame, (chin_x, chin_y), (hand_x, hand_y), (255, 0, 0), 2)
 
+        # Trigger or stop alarm based on distance
         now = time.time()
         if dist < threshold and now - last_alarm > alarm_cooldown:
             play_alarm()
