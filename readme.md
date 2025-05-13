@@ -1,192 +1,79 @@
 # Beard Guard: Stop Beard-Pulling & Fingernail Biting Alarm
 
-**Beard Guard** is designed for people with trichotillomania, beard-focused hair pulling, or nail biting who need a subtle, on-screen reminder to keep their hands away from their beard and nails while working at a computer.
+**Beard Guard** helps users with trichotillomania, compulsive beard-pulling, and chronic nail biting by sounding a random alarm whenever their hand approaches the beard or nails. It runs on Windows, macOS, and Ubuntu without any manual configuration.
 
 ## Who Is This For?
 
-People suffering from trichotillomania, compulsive beard-pulling, chronic nail biting, or habitual fingernail chewing looking for a lightweight, privacy-focused tool to curb these behaviors without intrusive hardware.
+Anyone struggling with trichotillomania, beard-focused hair pulling, or habitual fingernail chewing, who wants a lightweight, privacy-focused reminder to keep their hands away while using the computer.
 
-## Installation & Setup: Prevent Beard-Pulling and Nail Biting
+## Installation & Setup
 
-### Windows
-
-1. Install Python 3.8+ and ensure `python` and `pip` are in your PATH.
-2. Clone the repository:
-
-   ```powershell
-   git clone https://github.com/applifaction/beard-guard.git
-   cd beard-guard
-   ```
-3. Create and activate a virtual environment:
-
-   ```powershell
-   python -m venv venv
-   venv\Scripts\activate
-   ```
-4. Install dependencies:
-
-   ```powershell
-   pip install --upgrade pip
-   pip install opencv-python mediapipe playsound
-   ```
-5. The `alarm.wav` file is already included in the project folder.
-6. **Windows code tweak:** In `beard_guard.py`, replace the existing `play_alarm` function with:
-
-   ```python
-   from playsound import playsound
-   from threading import Thread
-
-   def play_alarm(path="alarm.wav"):
-       Thread(target=playsound, args=(path,), daemon=True).start()
-   ```
-7. Launch the program:
-
-   ```powershell
-   python beard_guard.py
-   ```
-
-### Mac
-
-1. Install Homebrew (if not already):
-
-   ```bash
-   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-   ```
-2. Use Homebrew to install Python:
-
-   ```bash
-   brew install python
-   ```
-3. Clone the repository:
+1. Clone the repository:
 
    ```bash
    git clone https://github.com/applifaction/beard-guard.git
    cd beard-guard
    ```
-4. Create and activate a virtual environment:
+2. Create and activate a virtual environment:
 
    ```bash
-   python3 -m venv venv
-   source venv/bin/activate
+   python3 -m venv venv          # or `python -m venv venv` on Windows
+   source venv/bin/activate     # or `venv\\Scripts\\activate` on Windows
    ```
-5. Install required packages:
+3. Install required Python packages:
 
    ```bash
    pip install --upgrade pip
    pip install opencv-python mediapipe
    ```
-6. The `alarm.wav` file is already included in the project folder.
-7. **Mac code tweak:** In `beard_guard.py`, replace the `play_alarm` function with:
-
-   ```python
-   import subprocess
-   from threading import Thread
-
-   def play_alarm(path="alarm.wav"):
-       def _play():
-           subprocess.run(["afplay", path], check=False)
-       Thread(target=_play, daemon=True).start()
-   ```
-8. Run the script:
+4. Run the application:
 
    ```bash
    python beard_guard.py
    ```
-
-### Ubuntu
-
-1. Install system dependencies:
-
-   ```bash
-   sudo apt update
-   sudo apt install python3-venv python3-full pulseaudio-utils
-   ```
-2. Clone the repository:
-
-   ```bash
-   git clone https://github.com/applifaction/beard-guard.git
-   cd beard-guard
-   ```
-3. Create and activate a virtual environment:
-
-   ```bash
-   python3 -m venv venv
-   source venv/bin/activate
-   ```
-4. Install required Python packages:
-
-   ```bash
-   pip install --upgrade pip
-   pip install opencv-python mediapipe
-   ```
-5. The `alarm.wav` file is already included in the project folder.
-6. Run the alarm tool:
-
-   ```bash
-   python beard_guard.py
-   ```
-
-## Key Features
-
-* Real-time face and hand landmark detection (MediaPipe) preventing beard-pulling and nail-biting
-* Customizable distance threshold to control sensitivity
-* Works on Windows (`playsound`), Mac (`afplay`), and Ubuntu (`paplay`)
-* Lightweight, privacy-focused—everything runs locally without sending video data anywhere
-
-## Configuration & Sensitivity
-
-Adjust how early the alarm triggers by editing **`DISTANCE_THRESHOLD_FACTOR`** in `beard_guard.py`:
-
-```python
-# Default: 1.00 (100% of face width)
-DISTANCE_THRESHOLD_FACTOR = 1.00
-```
-
-Increase or decrease this value to fine-tune when the alert fires.
 
 ## Autostart on Login
 
-### Windows Startup
+### Windows
 
-1. Create `run_beard_guard.bat`:
+1. Create a batch file `run_beard_guard.bat` in the project root:
 
    ```bat
    @echo off
    cd /d C:\path\to\beard-guard
-   venv\Scripts\activate
+   venv\\Scripts\\activate
    python beard_guard.py
    ```
-2. Place a shortcut to this batch file in the Windows Startup folder (`Win+R`, `shell:startup`).
+2. Place a shortcut to this file in your Startup folder (`Win+R`, enter `shell:startup`).
 
-### Mac Launch Agents
+### macOS
 
-Create `~/Library/LaunchAgents/com.yourusername.beardguard.plist`:
+1. Create a Launch Agent at `~/Library/LaunchAgents/com.applifaction.beardguard.plist`:
 
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-  <dict>
-    <key>Label</key>
-    <string>com.yourusername.beardguard</string>
-    <key>ProgramArguments</key>
-    <array>
-      <string>/usr/local/bin/python3</string>
-      <string>/full/path/to/beard-guard/beard_guard.py</string>
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-  </dict>
-</plist>
-```
+   ```xml
+   <?xml version="1.0" encoding="UTF-8"?>
+   <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+   <plist version="1.0">
+     <dict>
+       <key>Label</key>
+       <string>com.applifaction.beardguard</string>
+       <key>ProgramArguments</key>
+       <array>
+         <string>/usr/local/bin/python3</string>
+         <string>/full/path/to/beard-guard/beard_guard.py</string>
+       </array>
+       <key>RunAtLoad</key>
+       <true/>
+     </dict>
+   </plist>
+   ```
+2. Load it:
 
-Load with:
+   ```bash
+   launchctl load ~/Library/LaunchAgents/com.applifaction.beardguard.plist
+   ```
 
-```bash
-launchctl load ~/Library/LaunchAgents/com.yourusername.beardguard.plist
-```
-
-### Ubuntu Auto-Launch
+### Ubuntu
 
 Create `~/.config/autostart/beard_guard.desktop`:
 
@@ -194,19 +81,25 @@ Create `~/.config/autostart/beard_guard.desktop`:
 [Desktop Entry]
 Type=Application
 Name=Beard Guard
-Exec=/full/path/to/venv/bin/python /full/path/to/beard_guard.py
+Exec=/full/path/to/venv/bin/python /full/path/to/beard-guard/beard_guard.py
 X-GNOME-Autostart-enabled=true
 ```
+
+## Key Features
+
+* Real-time face and hand landmark detection (MediaPipe) to detect when your hand nears your beard or nails
+* Randomized alarm playback to prevent habituation
+* Alarm automatically stops after 2 seconds or as soon as you move your hand away
+* Cross-platform audio support: no additional setup required
+* Fully local processing—no video data leaves your machine
 
 ## Requirements
 
 * Python 3.8 or higher
 * USB or integrated webcam
 
----
-
 ## License
 
-This project is licensed under the MIT License – see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
 
-**Contribute**: Issues and pull requests are welcome. Let’s help more people overcome trichotillomania and nail biting with Beard Guard!
+**Contribute:** Issues and pull requests are welcome. Help more people curb unwanted habits with Beard Guard!

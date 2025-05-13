@@ -5,49 +5,82 @@ import mediapipe as mp
 import time
 import subprocess
 import random
+import sys
+import shutil
 from threading import Thread
+
+# Import winsound only on Windows
+use_winsound = sys.platform.startswith("win")
+if use_winsound:
+    import winsound
 
 # Base directory of the script
 BASE_DIR = Path(__file__).resolve().parent
 # Directory containing alarm sound files
 ALARMS_DIR = BASE_DIR / "alarms"
 
-# Global reference to the current alarm process
+# Global reference to the current alarm process or flag
 alarm_proc = None
+
+# Determine audio player for Linux and macOS
+if sys.platform.startswith("linux"):
+    audio_player = "paplay" if shutil.which("paplay") else "aplay"
+elif sys.platform == "darwin":
+    audio_player = "afplay"
+else:
+    audio_player = None
 
 # Function to play a random alarm sound, stoppable and with auto-timeout
 def play_alarm():
     global alarm_proc
-    # If an alarm is already playing, do nothing
-    if alarm_proc is not None and alarm_proc.poll() is None:
+    # If on Windows and already playing, skip
+    if use_winsound and alarm_proc:
         return
-    # Collect available .wav files
+    # If on Unix and process is running, skip
+    if not use_winsound and alarm_proc and alarm_proc.poll() is None:
+        return
+
+    # Select random sound file
     sounds = list(ALARMS_DIR.glob("*.wav"))
-    # Fallback to default if none found
     if sounds:
         alarm_path = random.choice(sounds)
     else:
         alarm_path = BASE_DIR / "alarm.wav"
-    # Launch paplay as a subprocess
-    proc = subprocess.Popen(["paplay", str(alarm_path)])
-    alarm_proc = proc
 
-    # Thread to auto-stop after 2 seconds
-    def _stop_after_delay(p):
-        time.sleep(2)
-        if p.poll() is None:
-            p.terminate()
-        # Clear global reference if it's the same process
-        global alarm_proc
-        if alarm_proc is p:
+    # Play depending on platform
+    if use_winsound:
+        winsound.PlaySound(str(alarm_path), winsound.SND_FILENAME | winsound.SND_ASYNC)
+        alarm_proc = True  # flag to indicate playing
+        # Auto-stop after 2 seconds
+        def _stop_win():
+            time.sleep(2)
+            winsound.PlaySound(None, winsound.SND_PURGE)
+            global alarm_proc
             alarm_proc = None
-    Thread(target=_stop_after_delay, args=(proc,), daemon=True).start()
+        Thread(target=_stop_win, daemon=True).start()
+    else:
+        proc = subprocess.Popen([audio_player, str(alarm_path)])
+        alarm_proc = proc
+        # Auto-stop after 2 seconds
+        def _stop_unix(p):
+            time.sleep(2)
+            if p.poll() is None:
+                p.terminate()
+            global alarm_proc
+            if alarm_proc is p:
+                alarm_proc = None
+        Thread(target=_stop_unix, args=(proc,), daemon=True).start()
 
 # Function to stop the alarm when hand moves away
 def stop_alarm():
     global alarm_proc
-    if alarm_proc is not None and alarm_proc.poll() is None:
-        alarm_proc.terminate()
+    if not alarm_proc:
+        return
+    if use_winsound:
+        winsound.PlaySound(None, winsound.SND_PURGE)
+    else:
+        if alarm_proc.poll() is None:
+            alarm_proc.terminate()
     alarm_proc = None
 
 # Initialize MediaPipe face mesh and hands solutions
@@ -56,6 +89,7 @@ mp_hands = mp.solutions.hands
 
 face_mesh = mp_face.FaceMesh(min_detection_confidence=0.5,
                              min_tracking_confidence=0.5)
+
 hands = mp_hands.Hands(min_detection_confidence=0.5,
                        min_tracking_confidence=0.5)
 
