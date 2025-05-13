@@ -4,18 +4,51 @@ import cv2
 import mediapipe as mp
 import time
 import subprocess
+import random
 from threading import Thread
 
 # Base directory of the script
 BASE_DIR = Path(__file__).resolve().parent
+# Directory containing alarm sound files
+ALARMS_DIR = BASE_DIR / "alarms"
 
-# Function to play the alarm non-blocking using paplay
-def play_alarm(filename="alarm.wav"):
-    alarm_path = BASE_DIR / filename
-    def _play():
-        # Use paplay (PulseAudio) to play the sound
-        subprocess.run(["paplay", str(alarm_path)], check=False)
-    Thread(target=_play, daemon=True).start()
+# Global reference to the current alarm process
+alarm_proc = None
+
+# Function to play a random alarm sound, stoppable and with auto-timeout
+def play_alarm():
+    global alarm_proc
+    # If an alarm is already playing, do nothing
+    if alarm_proc is not None and alarm_proc.poll() is None:
+        return
+    # Collect available .wav files
+    sounds = list(ALARMS_DIR.glob("*.wav"))
+    # Fallback to default if none found
+    if sounds:
+        alarm_path = random.choice(sounds)
+    else:
+        alarm_path = BASE_DIR / "alarm.wav"
+    # Launch paplay as a subprocess
+    proc = subprocess.Popen(["paplay", str(alarm_path)])
+    alarm_proc = proc
+
+    # Thread to auto-stop after 2 seconds
+    def _stop_after_delay(p):
+        time.sleep(2)
+        if p.poll() is None:
+            p.terminate()
+        # Clear global reference if it's the same process
+        global alarm_proc
+        if alarm_proc is p:
+            alarm_proc = None
+    Thread(target=_stop_after_delay, args=(proc,), daemon=True).start()
+
+# Function to stop the alarm when hand moves away
+def stop_alarm():
+    global alarm_proc
+    if alarm_proc is not None and alarm_proc.poll() is None:
+        alarm_proc.terminate()
+    alarm_proc = None
 
 # Initialize MediaPipe face mesh and hands solutions
 mp_face = mp.solutions.face_mesh
@@ -31,10 +64,10 @@ cap = cv2.VideoCapture(0)
 
 # Timestamp of last alarm and cooldown in seconds
 last_alarm = 0
-alarm_cooldown = 3.0  # seconds
+alarm_cooldown = 2.0  # seconds
 
 # Threshold factor for distance relative to face width
-DISTANCE_THRESHOLD_FACTOR = 0.75  # 75%
+DISTANCE_THRESHOLD_FACTOR = 1.00  # 100%
 
 while cap.isOpened():
     success, frame = cap.read()
@@ -76,11 +109,14 @@ while cap.isOpened():
         cv2.circle(frame, (hand_x, hand_y), 5, (0, 0, 255), -1)
         cv2.line(frame, (chin_x, chin_y), (hand_x, hand_y), (255, 0, 0), 2)
 
-        # Trigger alarm when distance falls below threshold
         now = time.time()
+        # If hand is too close, trigger alarm
         if dist < threshold and now - last_alarm > alarm_cooldown:
             play_alarm()
             last_alarm = now
+        # If hand moves away, stop alarm
+        elif dist >= threshold:
+            stop_alarm()
 
     # Display the annotated frame
     cv2.imshow('Beard Guard', frame)

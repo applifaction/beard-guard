@@ -138,8 +138,8 @@ People suffering from trichotillomania, compulsive beard-pulling, chronic nail b
 Adjust how early the alarm triggers by editing **`DISTANCE_THRESHOLD_FACTOR`** in `beard_guard.py`:
 
 ```python
-# Default: 0.75 (75% of face width)
-DISTANCE_THRESHOLD_FACTOR = 0.75
+# Default: 1.00 (100% of face width)
+DISTANCE_THRESHOLD_FACTOR = 1.00
 ```
 
 Increase or decrease this value to fine-tune when the alert fires.
