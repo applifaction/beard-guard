@@ -145,7 +145,7 @@ while True:
         if dist < threshold:
             if too_close_start is None:
                 too_close_start = now
-            elif now - too_close_start >= 0.5 and now - last_alarm > alarm_cooldown:
+            elif now - too_close_start >= 1 and now - last_alarm > alarm_cooldown:
                 play_alarm()
                 last_alarm = now
         else:
