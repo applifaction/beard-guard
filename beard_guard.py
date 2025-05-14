@@ -84,11 +84,8 @@ def stop_alarm():
 # Initialize MediaPipe face mesh and hands solutions
 mp_face = mp.solutions.face_mesh
 mp_hands = mp.solutions.hands
-
-face_mesh = mp_face.FaceMesh(min_detection_confidence=0.5,
-                             min_tracking_confidence=0.5)
-hands = mp_hands.Hands(min_detection_confidence=0.5,
-                       min_tracking_confidence=0.5)
+face_mesh = mp_face.FaceMesh(min_detection_confidence=0.5, min_tracking_confidence=0.5)
+hands = mp_hands.Hands(min_detection_confidence=0.5, min_tracking_confidence=0.5)
 
 # Open camera (0 = default webcam)
 cap = cv2.VideoCapture(0)
@@ -99,6 +96,9 @@ alarm_cooldown = 2.0  # seconds
 
 # Threshold factor for distance relative to face width
 DISTANCE_THRESHOLD_FACTOR = 1.00  # 100%
+
+# Track time when hand first enters too-close zone
+too_close_start = None
 
 while True:
     success, frame = cap.read()
@@ -142,10 +142,14 @@ while True:
 
         # Trigger or stop alarm based on distance
         now = time.time()
-        if dist < threshold and now - last_alarm > alarm_cooldown:
-            play_alarm()
-            last_alarm = now
-        elif dist >= threshold:
+        if dist < threshold:
+            if too_close_start is None:
+                too_close_start = now
+            elif now - too_close_start >= 0.5 and now - last_alarm > alarm_cooldown:
+                play_alarm()
+                last_alarm = now
+        else:
+            too_close_start = None
             stop_alarm()
 
     # Display the annotated frame
