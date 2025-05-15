@@ -41,8 +41,14 @@ def play_alarm():
 
     # Recreate window and bring it to fullscreen
     cv2.destroyWindow('Beard Guard')
-    cv2.namedWindow('Beard Guard', cv2.WND_PROP_FULLSCREEN)
-    cv2.setWindowProperty('Beard Guard', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+    cv2.namedWindow('Beard Guard', cv2.WINDOW_NORMAL)
+    if cap.isOpened():
+        frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        cv2.resizeWindow('Beard Guard', frame_width, frame_height)
+        screen_center_x = max(0, (1920 - frame_width) // 2)
+        screen_center_y = max(0, (1080 - frame_height) // 2)
+        cv2.moveWindow('Beard Guard', screen_center_x, screen_center_y)
     cv2.setWindowProperty('Beard Guard', cv2.WND_PROP_VISIBLE, 1)
 
     # Select random sound file; require at least one file
