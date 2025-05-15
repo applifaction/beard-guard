@@ -107,6 +107,9 @@ alarm_cooldown = 2.0  # seconds
 # Threshold factor for distance relative to face width
 DISTANCE_THRESHOLD_FACTOR = 1.00  # 100%
 
+# Threshold for hand Y position relative to eye height
+HAND_Y_THRESHOLD_FACTOR = 1.20  # Hand must not be above eye level (1.0 = exact eye level)
+
 # Track time when hand first enters too-close zone
 too_close_start = None
 
@@ -136,6 +139,18 @@ while True:
         idx_tip = hand_landmarks.landmark[8]
         hand_x, hand_y = int(idx_tip.x * w), int(idx_tip.y * h)
 
+        # Eye-level reference point: landmark 168
+        eye = face_landmarks.landmark[168]
+        eye_y = int(eye.y * h)
+
+        # Determine marker color based on hand height
+        hand_marker_color = (0, 0, 255)  # red
+        if hand_y < eye_y * HAND_Y_THRESHOLD_FACTOR:
+            hand_marker_color = (0, 255, 0)  # green
+            too_close_start = None
+            stop_alarm()
+            continue
+
         # Estimate face width using landmarks 234 (left) and 454 (right)
         left = face_landmarks.landmark[234]
         right = face_landmarks.landmark[454]
@@ -147,7 +162,7 @@ while True:
 
         # Draw visual markers
         cv2.circle(frame, (chin_x, chin_y), 5, (0, 255, 0), -1)
-        cv2.circle(frame, (hand_x, hand_y), 5, (0, 0, 255), -1)
+        cv2.circle(frame, (hand_x, hand_y), 5, hand_marker_color, -1)
         cv2.line(frame, (chin_x, chin_y), (hand_x, hand_y), (255, 0, 0), 2)
 
         # Trigger or stop alarm based on distance
