@@ -156,9 +156,7 @@ while True:
     cv2.imshow('Beard Guard', frame)
 
     # Exit when window is closed or ESC pressed
-    if cv2.getWindowProperty('Beard Guard', cv2.WND_PROP_VISIBLE) < 1:
-        break
-    if cv2.waitKey(1) & 0xFF == 27:
+    if cv2.waitKey(1) & 0xFF == 27 or cv2.getWindowProperty('Beard Guard', cv2.WND_PROP_VISIBLE) < 1:
         break
 
 # Cleanup
