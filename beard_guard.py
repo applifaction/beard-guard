@@ -108,7 +108,7 @@ alarm_cooldown = 2.0  # seconds
 DISTANCE_THRESHOLD_FACTOR = 1.00  # 100%
 
 # Threshold for hand Y position relative to eye height
-HAND_Y_THRESHOLD_FACTOR = 1.20  # Hand must not be above eye level (1.0 = exact eye level)
+HAND_Y_THRESHOLD_FACTOR = 1.2  # Hand must not be above eye level (1.0 = exact eye level)
 
 # Track time when hand first enters too-close zone
 too_close_start = None
@@ -125,6 +125,10 @@ while True:
     # Detect face and hand landmarks
     face_results = face_mesh.process(rgb)
     hand_results = hands.process(rgb)
+
+    # Default marker color and hand position validity
+    hand_marker_color = (0, 0, 255)  # red
+    hand_valid = False
 
     if face_results.multi_face_landmarks and hand_results.multi_hand_landmarks:
         face_landmarks = face_results.multi_face_landmarks[0]
@@ -143,36 +147,38 @@ while True:
         eye = face_landmarks.landmark[168]
         eye_y = int(eye.y * h)
 
-        # Determine marker color based on hand height
-        hand_marker_color = (0, 0, 255)  # red
+        # Update hand marker color if hand is too high
         if hand_y < eye_y * HAND_Y_THRESHOLD_FACTOR:
             hand_marker_color = (0, 255, 0)  # green
-            too_close_start = None
-            stop_alarm()
-            continue
+        else:
+            hand_valid = True
 
-        # Estimate face width using landmarks 234 (left) and 454 (right)
-        left = face_landmarks.landmark[234]
-        right = face_landmarks.landmark[454]
-        face_width = abs(int((right.x - left.x) * w))
-
-        # Calculate distance between chin and fingertip
-        dist = ((chin_x - hand_x)**2 + (chin_y - hand_y)**2) ** 0.5
-        threshold = face_width * DISTANCE_THRESHOLD_FACTOR
-
-        # Draw visual markers
+        # Draw visual markers even if skipping alarm check
         cv2.circle(frame, (chin_x, chin_y), 5, (0, 255, 0), -1)
         cv2.circle(frame, (hand_x, hand_y), 5, hand_marker_color, -1)
         cv2.line(frame, (chin_x, chin_y), (hand_x, hand_y), (255, 0, 0), 2)
 
-        # Trigger or stop alarm based on distance
-        now = time.time()
-        if dist < threshold:
-            if too_close_start is None:
-                too_close_start = now
-            elif now - too_close_start >= 1 and now - last_alarm > alarm_cooldown:
-                play_alarm()
-                last_alarm = now
+        if hand_valid:
+            # Estimate face width using landmarks 234 (left) and 454 (right)
+            left = face_landmarks.landmark[234]
+            right = face_landmarks.landmark[454]
+            face_width = abs(int((right.x - left.x) * w))
+
+            # Calculate distance between chin and fingertip
+            dist = ((chin_x - hand_x)**2 + (chin_y - hand_y)**2) ** 0.5
+            threshold = face_width * DISTANCE_THRESHOLD_FACTOR
+
+            # Trigger or stop alarm based on distance
+            now = time.time()
+            if dist < threshold:
+                if too_close_start is None:
+                    too_close_start = now
+                elif now - too_close_start >= 1 and now - last_alarm > alarm_cooldown:
+                    play_alarm()
+                    last_alarm = now
+            else:
+                too_close_start = None
+                stop_alarm()
         else:
             too_close_start = None
             stop_alarm()
