@@ -39,6 +39,12 @@ def play_alarm():
     if not use_winsound and alarm_proc and alarm_proc.poll() is None:
         return
 
+    # Recreate window and bring it to fullscreen
+    cv2.destroyWindow('Beard Guard')
+    cv2.namedWindow('Beard Guard', cv2.WND_PROP_FULLSCREEN)
+    cv2.setWindowProperty('Beard Guard', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+    cv2.setWindowProperty('Beard Guard', cv2.WND_PROP_VISIBLE, 1)
+
     # Select random sound file; require at least one file
     sounds = list(ALARMS_DIR.glob("*.wav"))
     if not sounds:
@@ -80,6 +86,10 @@ def stop_alarm():
         if alarm_proc.poll() is None:
             alarm_proc.terminate()
     alarm_proc = None
+
+    # Revert window to minimized state
+    cv2.setWindowProperty('Beard Guard', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_NORMAL)
+    cv2.setWindowProperty('Beard Guard', cv2.WND_PROP_VISIBLE, 0)
 
 # Initialize MediaPipe face mesh and hands solutions
 mp_face = mp.solutions.face_mesh
@@ -151,6 +161,15 @@ while True:
         else:
             too_close_start = None
             stop_alarm()
+
+    # Apply visual overlay during alarm
+    if alarm_proc:
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (0, 0), (frame.shape[1], frame.shape[0]), (0, 0, 0), -1)
+        alpha = 0.6
+        cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
+        cv2.putText(frame, "STOP!", (frame.shape[1] // 4, frame.shape[0] // 2),
+                    cv2.FONT_HERSHEY_SIMPLEX, 3, (0, 0, 255), 10)
 
     # Display the annotated frame
     cv2.imshow('Beard Guard', frame)
