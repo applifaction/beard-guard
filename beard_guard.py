@@ -96,6 +96,8 @@ def stop_alarm():
     # Revert window to minimized state
     cv2.setWindowProperty('Beard Guard', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_NORMAL)
     cv2.setWindowProperty('Beard Guard', cv2.WND_PROP_VISIBLE, 0)
+    # cv2.iconifyWindow is not supported in OpenCV
+    # No built-in minimize function; window is hidden via WND_PROP_VISIBLE
 
 # Initialize MediaPipe face mesh and hands solutions
 mp_face = mp.solutions.face_mesh
@@ -107,6 +109,7 @@ hands = mp_hands.Hands(min_detection_confidence=0.5, min_tracking_confidence=0.5
 cap = cv2.VideoCapture(0)
 
 # Timestamp of last alarm and cooldown in seconds
+TRIGGER_HOLD_DURATION = 2.0  # seconds hand must stay too close before triggering alarm
 last_alarm = 0
 alarm_cooldown = 2.0  # seconds
 
@@ -179,9 +182,10 @@ while True:
             if dist < threshold:
                 if too_close_start is None:
                     too_close_start = now
-                elif now - too_close_start >= 1 and now - last_alarm > alarm_cooldown:
+                elif now - too_close_start >= TRIGGER_HOLD_DURATION and now - last_alarm > alarm_cooldown:
                     play_alarm()
                     last_alarm = now
+                    too_close_start = None
             else:
                 too_close_start = None
                 stop_alarm()
