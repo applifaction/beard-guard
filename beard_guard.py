@@ -103,15 +103,15 @@ def stop_alarm():
 mp_face = mp.solutions.face_mesh
 mp_hands = mp.solutions.hands
 face_mesh = mp_face.FaceMesh(min_detection_confidence=0.5, min_tracking_confidence=0.5)
-hands = mp_hands.Hands(min_detection_confidence=0.5, min_tracking_confidence=0.5)
+hands = mp_hands.Hands(min_detection_confidence=0.8, min_tracking_confidence=0.5)
 
 # Open camera (0 = default webcam)
 cap = cv2.VideoCapture(0)
 
 # Timestamp of last alarm and cooldown in seconds
-TRIGGER_HOLD_DURATION = 2.0  # seconds hand must stay too close before triggering alarm
+TRIGGER_HOLD_DURATION = 0.5  # seconds hand must stay too close before triggering alarm
 last_alarm = 0
-alarm_cooldown = 2.0  # seconds
+alarm_cooldown = TRIGGER_HOLD_DURATION # seconds
 
 # Threshold factor for distance relative to face width
 DISTANCE_THRESHOLD_FACTOR = 1.00  # 100%
@@ -122,7 +122,7 @@ HAND_Y_THRESHOLD_FACTOR = 1.2  # Hand must not be above eye level (1.0 = exact e
 # Offset for the red safety line below the chin expressed as a percentage of
 # the distance between the chin and the tip of the nose. A value of 0.2 draws
 # the line at 20% of that distance below the chin.
-CHIN_LINE_OFFSET_FACTOR = 0.2
+CHIN_LINE_OFFSET_FACTOR = 0.4
 
 # Track time when hand first enters too-close zone
 too_close_start = None
