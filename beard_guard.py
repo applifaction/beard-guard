@@ -119,6 +119,11 @@ DISTANCE_THRESHOLD_FACTOR = 1.00  # 100%
 # Threshold for hand Y position relative to eye height
 HAND_Y_THRESHOLD_FACTOR = 1.2  # Hand must not be above eye level (1.0 = exact eye level)
 
+# Offset for the red safety line below the chin expressed as a percentage of
+# the distance between the chin and the tip of the nose. A value of 0.2 draws
+# the line at 20% of that distance below the chin.
+CHIN_LINE_OFFSET_FACTOR = 0.2
+
 # Track time when hand first enters too-close zone
 too_close_start = None
 
@@ -148,6 +153,16 @@ while True:
         chin = face_landmarks.landmark[152]
         chin_x, chin_y = int(chin.x * w), int(chin.y * h)
 
+        # Nose tip: landmark 1
+        nose = face_landmarks.landmark[1]
+        nose_y = int(nose.y * h)
+
+        # Distance between chin and nose tip
+        chin_nose_dist = abs(chin_y - nose_y)
+
+        # Position of red safety line below the chin
+        line_y = chin_y + int(chin_nose_dist * CHIN_LINE_OFFSET_FACTOR)
+
         # Index fingertip: landmark 8
         idx_tip = hand_landmarks.landmark[8]
         hand_x, hand_y = int(idx_tip.x * w), int(idx_tip.y * h)
@@ -156,8 +171,8 @@ while True:
         eye = face_landmarks.landmark[168]
         eye_y = int(eye.y * h)
 
-        # Update hand marker color if hand is too high
-        if hand_y < eye_y * HAND_Y_THRESHOLD_FACTOR:
+        # Update hand marker color if hand is outside valid region
+        if hand_y < eye_y * HAND_Y_THRESHOLD_FACTOR or hand_y > line_y:
             hand_marker_color = (0, 255, 0)  # green
         else:
             hand_valid = True
@@ -166,6 +181,7 @@ while True:
         cv2.circle(frame, (chin_x, chin_y), 5, (0, 255, 0), -1)
         cv2.circle(frame, (hand_x, hand_y), 5, hand_marker_color, -1)
         cv2.line(frame, (chin_x, chin_y), (hand_x, hand_y), (255, 0, 0), 2)
+        cv2.line(frame, (0, line_y), (w, line_y), (0, 0, 255), 2)
 
         if hand_valid:
             # Estimate face width using landmarks 234 (left) and 454 (right)

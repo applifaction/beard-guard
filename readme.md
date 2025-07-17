@@ -92,6 +92,9 @@ X-GNOME-Autostart-enabled=true
 * Alarm automatically stops after 2 seconds or as soon as you move your hand away
 * Cross-platform audio support: no additional setup required
 * Fully local processing—no video data leaves your machine
+* Adjustable red line below your chin to set a safe zone. Modify
+  `CHIN_LINE_OFFSET_FACTOR` in `beard_guard.py` to change the offset
+  (as a percentage of the distance between your chin and the tip of your nose).
 
 ## Requirements
 
