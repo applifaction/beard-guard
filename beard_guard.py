@@ -221,8 +221,15 @@ try:
         # Display the annotated frame
         cv2.imshow('Beard Guard', frame)
 
-        # Exit when window is closed or ESC pressed
-        if cv2.waitKey(1) & 0xFF == 27 or cv2.getWindowProperty('Beard Guard', cv2.WND_PROP_VISIBLE) < 1:
+        # Escape may reach the preview before the overlay owns keyboard input.
+        # During a warning it must dismiss, not terminate camera detection.
+        key = cv2.waitKey(1) & 0xFF
+        if key == 27:
+            if blackout_active:
+                screen_blackout_controller.dismiss()
+            else:
+                break
+        if cv2.getWindowProperty('Beard Guard', cv2.WND_PROP_VISIBLE) < 1:
             break
 finally:
     screen_blackout_controller.shutdown()

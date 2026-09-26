@@ -89,9 +89,9 @@ X-GNOME-Autostart-enabled=true
 
 * Real-time face and hand landmark detection (MediaPipe) to detect when your hand nears your beard or nails
 * Randomized alarm playback to prevent habituation
-* Solid black overlays cover all active connected monitors as soon as a too-close hand is detected (`TRIGGER_HOLD_DURATION = 0.0`, no intentional hold delay); no screen shake, desktop screenshots, or monitor power changes
+* Dark overlays with the Beardguard logo centered in a rounded gray frame cover every active monitor as soon as a too-close hand is detected (`TRIGGER_HOLD_DURATION = 0.0`); no screen shake, desktop screenshots, or monitor power changes
 * Move your hand away to uncover the screens immediately. Lost face/hand tracking also releases the overlays; stalled camera processing releases them after 1 second
-* Press **Esc** while the screens are black to dismiss the overlay until your hand leaves the detection zone. Esc in the camera preview still exits the app
+* Press **Esc** during a warning to dismiss it, even when another window has keyboard focus. It rearms only after 1 second of continuously safe camera frames, so a single lost detection cannot immediately darken the screens again. Esc in the camera preview dismisses an active warning; when no warning is active it exits the app
 * Alarm audio automatically stops after 2 seconds or as soon as you move your hand away; its cooldown does not interrupt the blackout
 * Cross-platform audio support: no additional setup required
 * Fully local processing—no video data leaves your machine
@@ -106,6 +106,10 @@ zone includes the upper beard near the ears (`HAND_Y_THRESHOLD_FACTOR = 1.0`).
 The preview window is no longer recreated or brought forward for every alarm.
 On Linux/X11, monitor discovery reads the current display configuration without
 reprobing hardware, creating one overlay per active display (including the laptop screen).
+The existing icon at `assets/icons/beardguard.png` is rendered once per required size
+and reused. Input is captured only while the warning is visible and is released
+on dismissal, tracking loss, camera stall, or shutdown. A temporary input grab by
+another application fails open and is retried rather than disabling warnings.
 
 ## Tests
 
@@ -116,8 +120,9 @@ xvfb-run -a -s '-screen 0 1280x1024x24' ./venv/bin/python -m unittest discover -
 ```
 
 The Linux GUI checks require Tkinter, Xvfb, `xrandr`, `xdotool`, and `xsetroot`.
-They cover blackout/release, Esc, camera stalls and tracking loss, two monitor
-regions, and bounded X11 connections over 100 repeated cycles.
+They cover branded overlays on two monitor regions, Esc with foreign keyboard
+focus, input release, tracking jitter, temporary grab conflicts, camera stalls,
+and bounded X11 connections over 100 repeated cycles.
 
 ## Requirements
 

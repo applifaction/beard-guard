@@ -34,11 +34,13 @@ def hand_result(state):
 
 
 class BeardGuardBlackoutTests(unittest.TestCase):
-    def replay(self, states, times, faces=None, read_error=None):
+    def replay(self, states, times, faces=None, read_error=None, keys=None):
         cv2 = mock.MagicMock()
         cv2.COLOR_BGR2RGB = 1
         cv2.WND_PROP_VISIBLE = 2
         cv2.waitKey.return_value = -1
+        if keys is not None:
+            cv2.waitKey.side_effect = keys
         cv2.getWindowProperty.return_value = 1
         cv2.flip.side_effect = lambda frame, _: frame
         cv2.cvtColor.side_effect = lambda frame, _: frame
@@ -66,6 +68,8 @@ class BeardGuardBlackoutTests(unittest.TestCase):
         cv2.destroyWindow.assert_not_called()
         cv2.namedWindow.assert_not_called()
         cv2.setWindowProperty.assert_not_called()
+        if keys and 27 in keys and states[keys.index(27)] == "near":
+            controller.dismiss.assert_called_once()
         return [call.args[0] for call in controller.set_active.call_args_list]
 
     def test_first_detected_frame_triggers_without_hold_delay(self):
@@ -87,6 +91,18 @@ class BeardGuardBlackoutTests(unittest.TestCase):
         self.assertEqual(
             self.replay(["near"] * 3, [10, 10.6, 10.7], faces=[True, True, False]),
             [True, True, False],
+        )
+
+    def test_escape_in_preview_dismisses_active_warning_without_exiting(self):
+        self.assertEqual(
+            self.replay(["near"] * 3, [10, 10.01, 10.02], keys=[-1, 27, -1]),
+            [True, True, True],
+        )
+
+    def test_escape_in_safe_preview_still_exits_the_app(self):
+        self.assertEqual(
+            self.replay(["far", "far"], [10, 10.01], keys=[27, -1]),
+            [False],
         )
 
     def test_camera_error_cleans_up_active_blackout(self):
