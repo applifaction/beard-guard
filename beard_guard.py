@@ -9,6 +9,8 @@ import sys
 import shutil
 from threading import Thread
 
+from screen_blackout import ScreenBlackoutController
+
 # Import winsound only on Windows
 use_winsound = sys.platform.startswith("win")
 if use_winsound:
@@ -18,6 +20,7 @@ if use_winsound:
 BASE_DIR = Path(__file__).resolve().parent
 # Directory containing alarm sound files
 ALARMS_DIR = BASE_DIR / "alarms"
+
 
 # Global reference to the current alarm process or flag
 alarm_proc = None
@@ -30,6 +33,7 @@ elif sys.platform == "darwin":
 else:
     audio_player = None
 
+
 # Function to play a random alarm sound, stoppable and with auto-timeout
 def play_alarm():
     global alarm_proc
@@ -38,18 +42,6 @@ def play_alarm():
         return
     if not use_winsound and alarm_proc and alarm_proc.poll() is None:
         return
-
-    # Recreate window and bring it to fullscreen
-    cv2.destroyWindow('Beard Guard')
-    cv2.namedWindow('Beard Guard', cv2.WINDOW_NORMAL)
-    if cap.isOpened():
-        frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        cv2.resizeWindow('Beard Guard', frame_width, frame_height)
-        screen_center_x = max(0, (1920 - frame_width) // 2)
-        screen_center_y = max(0, (1080 - frame_height) // 2)
-        cv2.moveWindow('Beard Guard', screen_center_x, screen_center_y)
-    cv2.setWindowProperty('Beard Guard', cv2.WND_PROP_VISIBLE, 1)
 
     # Select random sound file; require at least one file
     sounds = list(ALARMS_DIR.glob("*.wav"))
@@ -93,12 +85,6 @@ def stop_alarm():
             alarm_proc.terminate()
     alarm_proc = None
 
-    # Revert window to minimized state
-    cv2.setWindowProperty('Beard Guard', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_NORMAL)
-    cv2.setWindowProperty('Beard Guard', cv2.WND_PROP_VISIBLE, 0)
-    # cv2.iconifyWindow is not supported in OpenCV
-    # No built-in minimize function; window is hidden via WND_PROP_VISIBLE
-
 # Initialize MediaPipe face mesh and hands solutions
 mp_face = mp.solutions.face_mesh
 mp_hands = mp.solutions.hands
@@ -109,15 +95,24 @@ hands = mp_hands.Hands(min_detection_confidence=0.8, min_tracking_confidence=0.5
 cap = cv2.VideoCapture(0)
 
 # Timestamp of last alarm and cooldown in seconds
-TRIGGER_HOLD_DURATION = 0.5  # seconds hand must stay too close before triggering alarm
+TRIGGER_HOLD_DURATION = 0.0  # trigger on the first detected too-close frame; no hold delay
 last_alarm = 0
-alarm_cooldown = TRIGGER_HOLD_DURATION # seconds
+alarm_cooldown = 2 # seconds
+
+# Black overlays stay visible while the hand is too close, independently of audio.
+SCREEN_BLACKOUT_ENABLED = True
+SCREEN_BLACKOUT_RELEASE_TIMEOUT = 1.0  # fail open if camera frames stop arriving
+
+screen_blackout_controller = ScreenBlackoutController(
+    enabled=SCREEN_BLACKOUT_ENABLED,
+    release_timeout=SCREEN_BLACKOUT_RELEASE_TIMEOUT,
+)
 
 # Threshold factor for distance relative to face width
 DISTANCE_THRESHOLD_FACTOR = 1.00  # 100%
 
-# Threshold for hand Y position relative to eye height
-HAND_Y_THRESHOLD_FACTOR = 1.2  # Hand must not be above eye level (1.0 = exact eye level)
+# Upper boundary for the fingertip: include the upper beard near the ears.
+HAND_Y_THRESHOLD_FACTOR = 1.0  # Exact eye level; larger values exclude more of the upper beard.
 
 # Offset for the red safety line below the chin expressed as a percentage of
 # the distance between the chin and the tip of the nose. A value of 0.2 draws
@@ -127,104 +122,110 @@ CHIN_LINE_OFFSET_FACTOR = 0.4
 # Track time when hand first enters too-close zone
 too_close_start = None
 
-while True:
-    success, frame = cap.read()
-    if not success:
-        break
+try:
+    while True:
+        success, frame = cap.read()
+        if not success:
+            break
 
-    # Flip image horizontally and convert to RGB
-    frame = cv2.flip(frame, 1)
-    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        # Flip image horizontally and convert to RGB
+        frame = cv2.flip(frame, 1)
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-    # Detect face and hand landmarks
-    face_results = face_mesh.process(rgb)
-    hand_results = hands.process(rgb)
+        # Detect face and hand landmarks
+        face_results = face_mesh.process(rgb)
+        hand_results = hands.process(rgb)
 
-    # Default marker color and hand position validity
-    hand_marker_color = (0, 0, 255)  # red
-    hand_valid = False
+        # Default marker color and hand position validity
+        hand_marker_color = (0, 0, 255)  # red
+        hand_valid = False
+        hand_too_close = False  # missing face/hand tracking must release the blackout
 
-    if face_results.multi_face_landmarks and hand_results.multi_hand_landmarks:
-        face_landmarks = face_results.multi_face_landmarks[0]
-        hand_landmarks = hand_results.multi_hand_landmarks[0]
-        h, w, _ = frame.shape
+        if face_results.multi_face_landmarks and hand_results.multi_hand_landmarks:
+            face_landmarks = face_results.multi_face_landmarks[0]
+            hand_landmarks = hand_results.multi_hand_landmarks[0]
+            h, w, _ = frame.shape
 
-        # Chin point: landmark 152
-        chin = face_landmarks.landmark[152]
-        chin_x, chin_y = int(chin.x * w), int(chin.y * h)
+            # Chin point: landmark 152
+            chin = face_landmarks.landmark[152]
+            chin_x, chin_y = int(chin.x * w), int(chin.y * h)
 
-        # Nose tip: landmark 1
-        nose = face_landmarks.landmark[1]
-        nose_y = int(nose.y * h)
+            # Nose tip: landmark 1
+            nose = face_landmarks.landmark[1]
+            nose_y = int(nose.y * h)
 
-        # Distance between chin and nose tip
-        chin_nose_dist = abs(chin_y - nose_y)
+            # Distance between chin and nose tip
+            chin_nose_dist = abs(chin_y - nose_y)
 
-        # Position of red safety line below the chin
-        line_y = chin_y + int(chin_nose_dist * CHIN_LINE_OFFSET_FACTOR)
+            # Position of red safety line below the chin
+            line_y = chin_y + int(chin_nose_dist * CHIN_LINE_OFFSET_FACTOR)
 
-        # Index fingertip: landmark 8
-        idx_tip = hand_landmarks.landmark[8]
-        hand_x, hand_y = int(idx_tip.x * w), int(idx_tip.y * h)
+            # Index fingertip: landmark 8
+            idx_tip = hand_landmarks.landmark[8]
+            hand_x, hand_y = int(idx_tip.x * w), int(idx_tip.y * h)
 
-        # Eye-level reference point: landmark 168
-        eye = face_landmarks.landmark[168]
-        eye_y = int(eye.y * h)
+            # Eye-level reference point: landmark 168
+            eye = face_landmarks.landmark[168]
+            eye_y = int(eye.y * h)
 
-        # Update hand marker color if hand is outside valid region
-        if hand_y < eye_y * HAND_Y_THRESHOLD_FACTOR or hand_y > line_y:
-            hand_marker_color = (0, 255, 0)  # green
-        else:
-            hand_valid = True
-
-        # Draw visual markers even if skipping alarm check
-        cv2.circle(frame, (chin_x, chin_y), 5, (0, 255, 0), -1)
-        cv2.circle(frame, (hand_x, hand_y), 5, hand_marker_color, -1)
-        cv2.line(frame, (chin_x, chin_y), (hand_x, hand_y), (255, 0, 0), 2)
-        cv2.line(frame, (0, line_y), (w, line_y), (0, 0, 255), 2)
-
-        if hand_valid:
-            # Estimate face width using landmarks 234 (left) and 454 (right)
-            left = face_landmarks.landmark[234]
-            right = face_landmarks.landmark[454]
-            face_width = abs(int((right.x - left.x) * w))
-
-            # Calculate distance between chin and fingertip
-            dist = ((chin_x - hand_x)**2 + (chin_y - hand_y)**2) ** 0.5
-            threshold = face_width * DISTANCE_THRESHOLD_FACTOR
-
-            # Trigger or stop alarm based on distance
-            now = time.time()
-            if dist < threshold:
-                if too_close_start is None:
-                    too_close_start = now
-                elif now - too_close_start >= TRIGGER_HOLD_DURATION and now - last_alarm > alarm_cooldown:
-                    play_alarm()
-                    last_alarm = now
-                    too_close_start = None
+            # Update hand marker color if hand is outside valid region
+            if hand_y < eye_y * HAND_Y_THRESHOLD_FACTOR or hand_y > line_y:
+                hand_marker_color = (0, 255, 0)  # green
             else:
-                too_close_start = None
-                stop_alarm()
+                hand_valid = True
+
+            # Draw visual markers even if skipping alarm check
+            cv2.circle(frame, (chin_x, chin_y), 5, (0, 255, 0), -1)
+            cv2.circle(frame, (hand_x, hand_y), 5, hand_marker_color, -1)
+            cv2.line(frame, (chin_x, chin_y), (hand_x, hand_y), (255, 0, 0), 2)
+            cv2.line(frame, (0, line_y), (w, line_y), (0, 0, 255), 2)
+
+            if hand_valid:
+                # Estimate face width using landmarks 234 (left) and 454 (right)
+                left = face_landmarks.landmark[234]
+                right = face_landmarks.landmark[454]
+                face_width = abs(int((right.x - left.x) * w))
+
+                # Calculate distance between chin and fingertip
+                dist = ((chin_x - hand_x)**2 + (chin_y - hand_y)**2) ** 0.5
+                threshold = face_width * DISTANCE_THRESHOLD_FACTOR
+
+                hand_too_close = dist < threshold
+
+        now = time.monotonic()
+        blackout_active = False
+        if hand_too_close:
+            if too_close_start is None:
+                too_close_start = now
+            blackout_active = now - too_close_start >= TRIGGER_HOLD_DURATION
         else:
             too_close_start = None
             stop_alarm()
 
-    # Apply visual overlay during alarm
-    if alarm_proc:
-        overlay = frame.copy()
-        cv2.rectangle(overlay, (0, 0), (frame.shape[1], frame.shape[0]), (0, 0, 0), -1)
-        alpha = 0.6
-        cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
-        cv2.putText(frame, "STOP!", (frame.shape[1] // 4, frame.shape[0] // 2),
-                    cv2.FONT_HERSHEY_SIMPLEX, 3, (0, 0, 255), 10)
+        # Refresh every frame, not just when a sound starts. Audio cooldowns must
+        # never uncover the desktop while the hand is still near the beard.
+        screen_blackout_controller.set_active(blackout_active)
+        if blackout_active and now - last_alarm > alarm_cooldown:
+            play_alarm()
+            last_alarm = now
 
-    # Display the annotated frame
-    cv2.imshow('Beard Guard', frame)
+        # Apply visual overlay during alarm
+        if alarm_proc:
+            overlay = frame.copy()
+            cv2.rectangle(overlay, (0, 0), (frame.shape[1], frame.shape[0]), (0, 0, 0), -1)
+            alpha = 0.6
+            cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
+            cv2.putText(frame, "STOP!", (frame.shape[1] // 4, frame.shape[0] // 2),
+                        cv2.FONT_HERSHEY_SIMPLEX, 3, (0, 0, 255), 10)
 
-    # Exit when window is closed or ESC pressed
-    if cv2.waitKey(1) & 0xFF == 27 or cv2.getWindowProperty('Beard Guard', cv2.WND_PROP_VISIBLE) < 1:
-        break
+        # Display the annotated frame
+        cv2.imshow('Beard Guard', frame)
 
-# Cleanup
-cap.release()
-cv2.destroyAllWindows()
+        # Exit when window is closed or ESC pressed
+        if cv2.waitKey(1) & 0xFF == 27 or cv2.getWindowProperty('Beard Guard', cv2.WND_PROP_VISIBLE) < 1:
+            break
+finally:
+    screen_blackout_controller.shutdown()
+    stop_alarm()
+    cap.release()
+    cv2.destroyAllWindows()
