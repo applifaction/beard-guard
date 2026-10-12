@@ -91,8 +91,25 @@ mp_hands = mp.solutions.hands
 face_mesh = mp_face.FaceMesh(min_detection_confidence=0.5, min_tracking_confidence=0.5)
 hands = mp_hands.Hands(min_detection_confidence=0.8, min_tracking_confidence=0.5)
 
-# Open camera (0 = default webcam)
-cap = cv2.VideoCapture(0)
+# The Bison FHD camera produces frequent corrupted frames in its default YUYV
+# mode. MJPEG uses substantially less USB bandwidth and was stable in a direct
+# V4L2 comparison, so request it explicitly before configuring the dimensions.
+CAMERA_INDEX = 0
+CAMERA_WIDTH = 640
+CAMERA_HEIGHT = 480
+CAMERA_FPS = 30
+CAMERA_FOURCC = "MJPG"
+
+camera_backend = cv2.CAP_V4L2 if sys.platform.startswith("linux") else cv2.CAP_ANY
+cap = cv2.VideoCapture(CAMERA_INDEX, camera_backend)
+if not cap.isOpened():
+    raise RuntimeError(f"Could not open camera {CAMERA_INDEX}")
+
+cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*CAMERA_FOURCC))
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_WIDTH)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_HEIGHT)
+cap.set(cv2.CAP_PROP_FPS, CAMERA_FPS)
+cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
 # Timestamp of last alarm and cooldown in seconds
 TRIGGER_HOLD_DURATION = 0.0  # trigger on the first detected too-close frame; no hold delay
@@ -126,6 +143,7 @@ try:
     while True:
         success, frame = cap.read()
         if not success:
+            print("Camera frame read failed; stopping Beard Guard.", file=sys.stderr, flush=True)
             break
 
         # Flip image horizontally and convert to RGB

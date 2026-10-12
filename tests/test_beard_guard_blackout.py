@@ -64,6 +64,9 @@ class BeardGuardBlackoutTests(unittest.TestCase):
             else:
                 runpy.run_path(str(APP), run_name="__main__")
         self.assertEqual(controller.shutdown.call_count, 1)
+        cv2.VideoCapture.assert_called_once_with(0, cv2.CAP_V4L2)
+        cv2.VideoWriter_fourcc.assert_called_once_with(*"MJPG")
+        cap.set.assert_any_call(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc.return_value)
         cap.release.assert_called_once()
         cv2.destroyWindow.assert_not_called()
         cv2.namedWindow.assert_not_called()
