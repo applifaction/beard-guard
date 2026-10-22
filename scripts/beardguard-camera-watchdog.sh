@@ -175,6 +175,21 @@ clear_camera_fault() {
   rm -f "$XHCI_FAULT_LATCH"
 }
 
+xhci_controller_recovered_since_fault() {
+  local fault_epoch
+  [[ -e "$XHCI_FAULT_LATCH" ]] || return 1
+  fault_epoch="$(stat -c %Y -- "$XHCI_FAULT_LATCH" 2>/dev/null)" || return 1
+  [[ "$fault_epoch" =~ ^[0-9]+$ ]] || return 1
+  journalctl -u "$XHCI_WATCHDOG_UNIT" --since "@$fault_epoch" --no-pager -o cat 2>/dev/null \
+    | grep -F "recovered successfully" >/dev/null
+}
+
+clear_recovered_camera_fault() {
+  xhci_controller_recovered_since_fault || return 1
+  log "Confirmed xHCI controller recovery; clearing stale camera-fault latch and re-enabling automatic starts."
+  clear_camera_fault
+}
+
 mark_running() {
   running_origin="${1:-observed}"
   state="running"
@@ -231,6 +246,7 @@ fi
 
 log "Watchdog started. poll=${POLL_SECONDS}s startup_grace=${STARTUP_GRACE_SECONDS}s startup_retry=${STARTUP_RETRY_SECONDS}s startup_failure_window=${STARTUP_FAILURE_WINDOW_SECONDS}s resume_delay=${RESUME_DELAY_SECONDS}s claim_guard=${CLAIM_GUARD_SECONDS}s no_call_restart=${NO_CALL_RESTART_SECONDS}s start_on_login=${START_ON_LOGIN}"
 
+clear_recovered_camera_fault || true
 if [[ -e "$XHCI_FAULT_LATCH" ]]; then
   state="fault_quarantine"
   log "Persistent camera-fault latch is active; automatic $APP_NAME starts are disabled until a manual start."
@@ -365,7 +381,9 @@ while true; do
       ;;
 
     fault_quarantine)
-      if beardguard_running; then
+      if clear_recovered_camera_fault; then
+        state="initial"
+      elif beardguard_running; then
         log "$APP_NAME started manually after camera fault; clearing fault latch for this attempt."
         clear_camera_fault
         mark_running

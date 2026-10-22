@@ -183,6 +183,24 @@ class CameraWatchdogTest(unittest.TestCase):
         self.assertTrue(self.fault_latch.exists(), self.log.read_text())
         self.assertNotIn("clearing fault latch", self.log.read_text())
 
+    def test_recovered_controller_clears_fault_latch_and_restarts(self):
+        self.fault_latch.write_text("latched\n")
+        self.env["BEARDGUARD_STARTUP_GRACE_SECONDS"] = "0"
+        self.start_watchdog()
+        time.sleep(0.2)
+        self.assertFalse(self.marker.exists(), self.log.read_text())
+
+        self.xhci_log.write_text(
+            "xHCI controller 0000:80:14.0 recovered successfully\n"
+        )
+
+        self.assertTrue(
+            wait_for(lambda: not self.fault_latch.exists()),
+            self.log.read_text(),
+        )
+        self.assertTrue(wait_for(self.marker.exists), self.log.read_text())
+        self.assertIn("clearing stale camera-fault latch", self.log.read_text())
+
     def test_persistent_fault_latch_requires_manual_beardguard_start(self):
         self.fault_latch.write_text("latched\n")
         self.start_watchdog()
