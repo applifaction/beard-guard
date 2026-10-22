@@ -19,8 +19,11 @@ START_ON_LOGIN="${BEARDGUARD_START_ON_LOGIN:-1}"
 LOG_FILE="${BEARDGUARD_WATCHDOG_LOG:-$HOME/.local/state/beardguard/watchdog.log}"
 XHCI_WATCHDOG_UNIT="${BEARDGUARD_XHCI_WATCHDOG_UNIT:-xhci-input-watchdog.service}"
 XHCI_FAULT_LATCH="${BEARDGUARD_XHCI_FAULT_LATCH:-$HOME/.local/state/beardguard/camera-fault-latched}"
+XHCI_RECOVERY_RETRY_MARKER="${BEARDGUARD_XHCI_RECOVERY_RETRY_MARKER:-$HOME/.local/state/beardguard/xhci-recovery-retry}"
+XHCI_RECOVERY_RETRY_WINDOW_SECONDS="${BEARDGUARD_XHCI_RECOVERY_RETRY_WINDOW_SECONDS:-600}"
+recovery_block_logged=0
 
-mkdir -p "$(dirname "$LOG_FILE")" "$(dirname "$XHCI_FAULT_LATCH")"
+mkdir -p "$(dirname "$LOG_FILE")" "$(dirname "$XHCI_FAULT_LATCH")" "$(dirname "$XHCI_RECOVERY_RETRY_MARKER")"
 
 log() {
   printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" | tee -a "$LOG_FILE" >&2
@@ -184,10 +187,38 @@ xhci_controller_recovered_since_fault() {
     | grep -F "recovered successfully" >/dev/null
 }
 
+recovery_retry_allowed() {
+  local marker_epoch marker_kernel fault_epoch current_kernel
+  [[ -e "$XHCI_RECOVERY_RETRY_MARKER" ]] || return 0
+  marker_kernel="$(head -n 1 "$XHCI_RECOVERY_RETRY_MARKER" 2>/dev/null || true)"
+  current_kernel="$(uname -r)"
+  [[ "$marker_kernel" == "$current_kernel" ]] || return 0
+  marker_epoch="$(stat -c %Y -- "$XHCI_RECOVERY_RETRY_MARKER" 2>/dev/null)" || return 0
+  fault_epoch="$(stat -c %Y -- "$XHCI_FAULT_LATCH" 2>/dev/null)" || return 0
+  (( fault_epoch < marker_epoch || fault_epoch - marker_epoch >= XHCI_RECOVERY_RETRY_WINDOW_SECONDS ))
+}
+
 clear_recovered_camera_fault() {
   xhci_controller_recovered_since_fault || return 1
-  log "Confirmed xHCI controller recovery; clearing stale camera-fault latch and re-enabling automatic starts."
+  if ! recovery_retry_allowed; then
+    if (( ! recovery_block_logged )); then
+      log "Repeated xHCI fault on the same kernel within ${XHCI_RECOVERY_RETRY_WINDOW_SECONDS}s; keeping automatic starts quarantined."
+      recovery_block_logged=1
+    fi
+    return 1
+  fi
+  recovery_block_logged=0
+  printf '%s\n' "$(uname -r)" > "$XHCI_RECOVERY_RETRY_MARKER"
+  log "Confirmed xHCI controller recovery; clearing stale camera-fault latch and re-enabling one automatic retry."
   clear_camera_fault
+}
+
+clear_recovery_retry_after_stable_run() {
+  [[ -e "$XHCI_RECOVERY_RETRY_MARKER" ]] || return 0
+  if (( $(date +%s) - running_since >= XHCI_RECOVERY_RETRY_WINDOW_SECONDS )); then
+    rm -f "$XHCI_RECOVERY_RETRY_MARKER"
+    log "$APP_NAME remained stable for ${XHCI_RECOVERY_RETRY_WINDOW_SECONDS}s; re-arming automatic xHCI recovery."
+  fi
 }
 
 mark_running() {
@@ -322,6 +353,7 @@ while true; do
       ;;
 
     running)
+      clear_recovery_retry_after_stable_run
       if xhci_camera_storm_since "$running_since"; then
         log "xHCI camera error storm detected while $APP_NAME owns the camera; stopping capture and latching automatic restart."
         latch_camera_fault

@@ -38,12 +38,12 @@ The script should be configurable through environment variables:
 
 `beardguard.desktop` continues to launch Beard Guard itself with the app icon.
 
-A separate user-level autostart file, `beardguard-watchdog.desktop`, starts the watchdog at login. This keeps responsibilities separate:
+The installer enables `beardguard-watchdog.service` for the systemd user manager's graphical-session target. The service runs the watchdog with `Restart=always`, so a watchdog exit cannot silently disable later Beard Guard restarts. After a completed xHCI recovery, the watchdog permits one automatic retry. A second xHCI fault on the same kernel within ten minutes remains quarantined to prevent a controller-reset loop; a kernel change permits a fresh retry. On systems without a usable systemd user manager, the installer falls back to `beardguard-watchdog.desktop`.
+
+This keeps responsibilities separate:
 
 - `beardguard.desktop`: “start the app now”
-- `beardguard-watchdog.desktop`: “keep Beard Guard coming back after calls”
-
-The existing installer script should install both desktop entries.
+- `beardguard-watchdog.service`: “keep Beard Guard coming back after calls, camera recovery, or watchdog exits”
 
 ### Launch behavior
 

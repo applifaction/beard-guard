@@ -105,7 +105,32 @@ DESKTOP
 chmod 644 "$desktop_file"
 
 watchdog_desktop_file="$autostart_dir/$APP_ID-watchdog.desktop"
-cat > "$watchdog_desktop_file" <<DESKTOP
+watchdog_service_file="$HOME/.config/systemd/user/$APP_ID-watchdog.service"
+
+if command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then
+  mkdir -p "$(dirname "$watchdog_service_file")"
+  cat > "$watchdog_service_file" <<SERVICE
+[Unit]
+Description=$APP_NAME camera-aware autostart watchdog
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+WorkingDirectory=$PROJECT_DIR
+ExecStart=$WATCHDOG_SCRIPT
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target
+SERVICE
+  chmod 644 "$watchdog_service_file"
+  rm -f "$watchdog_desktop_file"
+  systemctl --user daemon-reload
+  systemctl --user enable --now "$APP_ID-watchdog.service"
+else
+  cat > "$watchdog_desktop_file" <<DESKTOP
 [Desktop Entry]
 Type=Application
 Name=$APP_NAME Camera Watchdog
@@ -118,8 +143,9 @@ Categories=Utility;
 StartupNotify=false
 X-GNOME-Autostart-enabled=true
 DESKTOP
+  chmod 644 "$watchdog_desktop_file"
+fi
 
-chmod 644 "$watchdog_desktop_file"
 # Remove both current and legacy direct-launch entries. The watchdog is the
 # only autostart owner; direct entries bypass camera arbitration and locking.
 rm -f "$autostart_dir/$APP_ID.desktop" "$autostart_dir/beard_guard.desktop"
@@ -133,5 +159,9 @@ if command -v gtk-update-icon-cache >/dev/null 2>&1 && [[ -f "$HOME/.local/share
 fi
 
 echo "Installed $APP_NAME desktop entry: $desktop_file"
-echo "Installed watchdog autostart entry: $watchdog_desktop_file"
+if [[ -f "$watchdog_service_file" ]]; then
+  echo "Installed restartable watchdog user service: $watchdog_service_file"
+else
+  echo "Installed watchdog autostart entry: $watchdog_desktop_file"
+fi
 echo "Installed icons under: $HOME/.local/share/icons/hicolor/*/apps/$APP_ID.png"

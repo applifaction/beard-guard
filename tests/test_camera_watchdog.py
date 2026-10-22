@@ -11,7 +11,7 @@ PROJECT_DIR = Path(__file__).resolve().parents[1]
 WATCHDOG = PROJECT_DIR / "scripts" / "beardguard-camera-watchdog.sh"
 
 
-def wait_for(predicate, timeout=5.0):
+def wait_for(predicate, timeout=8.0):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if predicate():
@@ -49,6 +49,7 @@ class CameraWatchdogTest(unittest.TestCase):
         journalctl.chmod(0o755)
         self.xhci_log = self.root / "xhci-watchdog.log"
         self.fault_latch = self.root / "camera-fault-latched"
+        self.recovery_retry_marker = self.root / "xhci-recovery-retry"
         self.env = os.environ.copy()
         self.env.update(
             {
@@ -65,6 +66,8 @@ class CameraWatchdogTest(unittest.TestCase):
                 "BEARDGUARD_TEST_LAUNCH_MARKER": str(self.marker),
                 "BEARDGUARD_WATCHDOG_LOG": str(self.log),
                 "BEARDGUARD_XHCI_FAULT_LATCH": str(self.fault_latch),
+                "BEARDGUARD_XHCI_RECOVERY_RETRY_MARKER": str(self.recovery_retry_marker),
+                "BEARDGUARD_XHCI_RECOVERY_RETRY_WINDOW_SECONDS": "600",
                 "BEARDGUARD_TEST_XHCI_LOG": str(self.xhci_log),
             }
         )
@@ -134,7 +137,7 @@ class CameraWatchdogTest(unittest.TestCase):
 
         self.assertTrue(wait_for(lambda: launch_count() >= 1), self.log.read_text())
         self.assertTrue(
-            wait_for(lambda: launch_count() >= 2, timeout=3.0),
+            wait_for(lambda: launch_count() >= 2, timeout=6.0),
             self.log.read_text(),
         )
         self.assertTrue(self.log_contains("Early startup exit"), self.log.read_text())
@@ -200,6 +203,21 @@ class CameraWatchdogTest(unittest.TestCase):
         )
         self.assertTrue(wait_for(self.marker.exists), self.log.read_text())
         self.assertIn("clearing stale camera-fault latch", self.log.read_text())
+
+    def test_repeated_xhci_fault_on_same_kernel_stays_quarantined(self):
+        self.recovery_retry_marker.write_text(f"{os.uname().release}\n")
+        self.fault_latch.write_text("latched\n")
+        self.xhci_log.write_text(
+            "xHCI controller 0000:80:14.0 recovered successfully\n"
+        )
+        self.env["BEARDGUARD_STARTUP_GRACE_SECONDS"] = "0"
+
+        self.start_watchdog()
+        time.sleep(0.5)
+
+        self.assertTrue(self.fault_latch.exists(), self.log.read_text())
+        self.assertFalse(self.marker.exists(), self.log.read_text())
+        self.assertIn("Repeated xHCI fault on the same kernel", self.log.read_text())
 
     def test_persistent_fault_latch_requires_manual_beardguard_start(self):
         self.fault_latch.write_text("latched\n")

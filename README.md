@@ -91,7 +91,7 @@ After testing, install the desktop launcher and camera-aware autostart watchdog:
 ./scripts/install-ubuntu-desktop-entry.sh
 ```
 
-The watchdog yields the webcam to video-call applications and restarts Beardguard after they release it. Do not add `beard_guard.py` as a second direct autostart entry; that would bypass camera arbitration and the single-instance launcher.
+The installer enables `beardguard-watchdog.service` as a restartable systemd user service for the graphical session. The watchdog yields the webcam to video-call applications and permits one automatic Beardguard retry after a completed xHCI recovery. A repeated xHCI fault on the same kernel within ten minutes stays quarantined instead of causing a USB-controller reset loop. Check the supervisor with `systemctl --user status beardguard-watchdog.service`. Do not add `beard_guard.py` as a second direct autostart entry; that would bypass camera arbitration and the single-instance launcher.
 
 ## Configuration
 
