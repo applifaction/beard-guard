@@ -27,7 +27,10 @@ def face_result(present=True):
 def hand_result(state):
     points = [types.SimpleNamespace(x=0.5, y=0.5) for _ in range(21)]
     points[8].x = 0.4
-    points[8].y = 0.45 if state == "near" else 0.95
+    points[8].y = {
+        "near": 0.45,
+        "lower_beard": 0.82,
+    }.get(state, 0.95)
     return types.SimpleNamespace(
         multi_hand_landmarks=[types.SimpleNamespace(landmark=points)] if state != "missing" else None
     )
@@ -44,9 +47,12 @@ class BeardGuardBlackoutTests(unittest.TestCase):
         cv2.getWindowProperty.return_value = 1
         cv2.flip.side_effect = lambda frame, _: frame
         cv2.cvtColor.side_effect = lambda frame, _: frame
-        frame = types.SimpleNamespace(shape=(480, 640, 3))
-        cap = cv2.VideoCapture.return_value
-        cap.read.side_effect = [(True, frame)] * len(states) + [read_error or (False, None)]
+        capture_frame = types.SimpleNamespace(shape=(480, 640, 3))
+        cv2.resize.return_value = capture_frame
+        cap = mock.MagicMock()
+        cap.isOpened.return_value = True
+        cap.read.side_effect = [(True, capture_frame)] * len(states) + [read_error or (False, None)]
+        camera_capture = types.SimpleNamespace(open_linux_camera=mock.Mock(return_value=cap))
         mp = mock.MagicMock()
         mp.solutions.face_mesh.FaceMesh.return_value.process.side_effect = [
             face_result(present) for present in (faces or [True] * len(states))
@@ -54,7 +60,15 @@ class BeardGuardBlackoutTests(unittest.TestCase):
         mp.solutions.hands.Hands.return_value.process.side_effect = [hand_result(s) for s in states]
         controller = mock.MagicMock()
         module = types.SimpleNamespace(ScreenBlackoutController=mock.Mock(return_value=controller))
-        with mock.patch.dict(sys.modules, {"cv2": cv2, "mediapipe": mp, "screen_blackout": module}), \
+        with mock.patch.dict(
+            sys.modules,
+            {
+                "cv2": cv2,
+                "mediapipe": mp,
+                "camera_capture": camera_capture,
+                "screen_blackout": module,
+            },
+        ), \
              mock.patch.dict(os.environ, {"DISPLAY": ""}), \
              mock.patch("time.monotonic", side_effect=times), \
              mock.patch("pathlib.Path.glob", return_value=[]):
@@ -64,9 +78,16 @@ class BeardGuardBlackoutTests(unittest.TestCase):
             else:
                 runpy.run_path(str(APP), run_name="__main__")
         self.assertEqual(controller.shutdown.call_count, 1)
-        cv2.VideoCapture.assert_called_once_with(0, cv2.CAP_V4L2)
-        cv2.VideoWriter_fourcc.assert_called_once_with(*"MJPG")
-        cap.set.assert_any_call(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc.return_value)
+        camera_capture.open_linux_camera.assert_called_once_with(
+            camera_index=0,
+            width=352,
+            height=288,
+            fps=30,
+            prefer_ir=False,
+            primary_input_format="yuyv422",
+            allow_ir_fallback=False,
+        )
+        cv2.resize.assert_not_called()
         cap.release.assert_called_once()
         cv2.destroyWindow.assert_not_called()
         cv2.namedWindow.assert_not_called()
@@ -75,31 +96,50 @@ class BeardGuardBlackoutTests(unittest.TestCase):
             controller.dismiss.assert_called_once()
         return [call.args[0] for call in controller.set_active.call_args_list]
 
-    def test_first_detected_frame_triggers_without_hold_delay(self):
-        self.assertEqual(self.replay(["near"], [10]), [True])
-
-    def test_blackout_without_sound_files_stays_until_hand_leaves(self):
+    def test_blackout_requires_sustained_too_close_detection(self):
         self.assertEqual(
-            self.replay(["near", "near", "near", "near", "far"], [10, 10.01, 10.02, 13, 13.1]),
-            [True, True, True, True, False],
+            self.replay(["near", "near", "near"], [10, 10.2, 10.25]),
+            [False, False, True],
         )
 
-    def test_lost_hand_clears_blackout_and_rearms_immediately(self):
+    def test_lower_beard_position_triggers_blackout(self):
         self.assertEqual(
-            self.replay(["near", "near", "missing", "near", "near"], [10, 10.01, 10.02, 10.03, 10.04]),
-            [True, True, False, True, True],
+            self.replay(
+                ["lower_beard", "lower_beard", "lower_beard"],
+                [10, 10.2, 10.25],
+            ),
+            [False, False, True],
         )
 
-    def test_lost_face_clears_blackout(self):
+    def test_blackout_releases_after_hand_stays_away_for_grace_period(self):
         self.assertEqual(
-            self.replay(["near"] * 3, [10, 10.6, 10.7], faces=[True, True, False]),
-            [True, True, False],
+            self.replay(
+                ["near", "near", "near", "near", "far", "far"],
+                [10, 10.1, 10.2, 10.3, 10.4, 11.0],
+            ),
+            [False, False, False, True, True, False],
+        )
+
+    def test_single_missing_hand_detection_does_not_flicker_blackout(self):
+        self.assertEqual(
+            self.replay(["near", "near", "missing", "near", "missing"], [10, 10.25, 10.3, 10.4, 10.5]),
+            [False, True, True, True, True],
+        )
+
+    def test_blackout_releases_after_face_stays_missing_for_grace_period(self):
+        self.assertEqual(
+            self.replay(
+                ["near"] * 4,
+                [10, 10.25, 10.3, 10.8],
+                faces=[True, True, False, False],
+            ),
+            [False, True, True, False],
         )
 
     def test_escape_in_preview_dismisses_active_warning_without_exiting(self):
         self.assertEqual(
-            self.replay(["near"] * 3, [10, 10.01, 10.02], keys=[-1, 27, -1]),
-            [True, True, True],
+            self.replay(["near"] * 3, [10, 10.25, 10.3], keys=[-1, 27, -1]),
+            [False, True, True],
         )
 
     def test_escape_in_safe_preview_still_exits_the_app(self):
@@ -111,7 +151,7 @@ class BeardGuardBlackoutTests(unittest.TestCase):
     def test_camera_error_cleans_up_active_blackout(self):
         self.assertEqual(
             self.replay(["near", "near"], [10, 10.6], read_error=RuntimeError("camera failed")),
-            [True, True],
+            [False, True],
         )
 
 

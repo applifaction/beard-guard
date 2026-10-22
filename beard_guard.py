@@ -7,9 +7,13 @@ import subprocess
 import random
 import sys
 import shutil
+import os
+import re
 from threading import Thread
 
+from camera_capture import open_linux_camera
 from screen_blackout import ScreenBlackoutController
+from warning_state import WarningDebouncer
 
 # Import winsound only on Windows
 use_winsound = sys.platform.startswith("win")
@@ -21,9 +25,12 @@ BASE_DIR = Path(__file__).resolve().parent
 # Directory containing alarm sound files
 ALARMS_DIR = BASE_DIR / "alarms"
 
+APP_NAME = "Beard Guard"
+APP_ID = "beardguard"
 
 # Global reference to the current alarm process or flag
 alarm_proc = None
+window_identity_configured = False
 
 # Determine audio player for Linux and macOS
 if sys.platform.startswith("linux"):
@@ -32,6 +39,44 @@ elif sys.platform == "darwin":
     audio_player = "afplay"
 else:
     audio_player = None
+
+def configure_linux_window_identity(force=False):
+    """Set the OpenCV X11 window class so Ubuntu/GNOME can map the app icon."""
+    global window_identity_configured
+    if window_identity_configured and not force:
+        return
+    if not sys.platform.startswith("linux") or not os.environ.get("DISPLAY") or not shutil.which("xprop"):
+        return
+
+    try:
+        client_list = subprocess.check_output(
+            ["xprop", "-root", "_NET_CLIENT_LIST"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+            timeout=0.5,
+        )
+        window_ids = re.findall(r"0x[0-9a-fA-F]+", client_list)
+        current_pid = str(os.getpid())
+
+        for window_id in window_ids:
+            props = subprocess.check_output(
+                ["xprop", "-id", window_id, "_NET_WM_PID", "_NET_WM_NAME", "WM_NAME"],
+                text=True,
+                stderr=subprocess.DEVNULL,
+                timeout=0.5,
+            )
+            if f"_NET_WM_PID(CARDINAL) = {current_pid}" in props and APP_NAME in props:
+                subprocess.run(
+                    ["xprop", "-id", window_id, "-f", "WM_CLASS", "8s", "-set", "WM_CLASS", APP_ID],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                    timeout=0.5,
+                )
+                window_identity_configured = True
+                return
+    except (subprocess.SubprocessError, OSError):
+        return
 
 
 # Function to play a random alarm sound, stoppable and with auto-timeout
@@ -91,38 +136,58 @@ mp_hands = mp.solutions.hands
 face_mesh = mp_face.FaceMesh(min_detection_confidence=0.5, min_tracking_confidence=0.5)
 hands = mp_hands.Hands(min_detection_confidence=0.8, min_tracking_confidence=0.5)
 
-# The Bison FHD camera produces frequent corrupted frames in its default YUYV
-# mode. MJPEG uses substantially less USB bandwidth and was stable in a direct
-# V4L2 comparison, so request it explicitly before configuring the dimensions.
+# This Bison camera's MJPEG endpoint desynchronizes the xHCI transfer ring.
+# Its raw YUYV endpoint provides stable color frames, while the IR node emits
+# alternating black frames. Capture at the tested 352x288 bandwidth, upscale
+# for landmark processing, and fail closed instead of using either faulty stream.
 CAMERA_INDEX = 0
-CAMERA_WIDTH = 640
-CAMERA_HEIGHT = 480
+CAMERA_WIDTH = 352
+CAMERA_HEIGHT = 288
 CAMERA_FPS = 30
 CAMERA_FOURCC = "MJPG"
+PROCESSING_WIDTH = 640
+PROCESSING_HEIGHT = 480
 
-camera_backend = cv2.CAP_V4L2 if sys.platform.startswith("linux") else cv2.CAP_ANY
-cap = cv2.VideoCapture(CAMERA_INDEX, camera_backend)
+if sys.platform.startswith("linux"):
+    cap = open_linux_camera(
+        camera_index=CAMERA_INDEX,
+        width=CAMERA_WIDTH,
+        height=CAMERA_HEIGHT,
+        fps=CAMERA_FPS,
+        prefer_ir=False,
+        primary_input_format="yuyv422",
+        allow_ir_fallback=False,
+    )
+else:
+    cap = cv2.VideoCapture(CAMERA_INDEX, cv2.CAP_ANY)
+    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*CAMERA_FOURCC))
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_WIDTH)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_HEIGHT)
+    cap.set(cv2.CAP_PROP_FPS, CAMERA_FPS)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
 if not cap.isOpened():
     raise RuntimeError(f"Could not open camera {CAMERA_INDEX}")
 
-cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*CAMERA_FOURCC))
-cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_WIDTH)
-cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_HEIGHT)
-cap.set(cv2.CAP_PROP_FPS, CAMERA_FPS)
-cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-
 # Timestamp of last alarm and cooldown in seconds
-TRIGGER_HOLD_DURATION = 0.0  # trigger on the first detected too-close frame; no hold delay
+TRIGGER_HOLD_DURATION = 0.25  # reject isolated landmark jitter before covering the desktop
 last_alarm = 0
 alarm_cooldown = 2 # seconds
 
 # Black overlays stay visible while the hand is too close, independently of audio.
+# Brief missed landmarks are normal; keep the warning stable until tracking has
+# remained safe for this long instead of flashing the desktop between frames.
 SCREEN_BLACKOUT_ENABLED = True
+SCREEN_BLACKOUT_CLEAR_GRACE_DURATION = 0.5
 SCREEN_BLACKOUT_RELEASE_TIMEOUT = 1.0  # fail open if camera frames stop arriving
 
 screen_blackout_controller = ScreenBlackoutController(
     enabled=SCREEN_BLACKOUT_ENABLED,
     release_timeout=SCREEN_BLACKOUT_RELEASE_TIMEOUT,
+)
+warning_debouncer = WarningDebouncer(
+    activation_duration=TRIGGER_HOLD_DURATION,
+    clear_duration=SCREEN_BLACKOUT_CLEAR_GRACE_DURATION,
 )
 
 # Threshold factor for distance relative to face width
@@ -131,13 +196,9 @@ DISTANCE_THRESHOLD_FACTOR = 1.00  # 100%
 # Upper boundary for the fingertip: include the upper beard near the ears.
 HAND_Y_THRESHOLD_FACTOR = 1.0  # Exact eye level; larger values exclude more of the upper beard.
 
-# Offset for the red safety line below the chin expressed as a percentage of
-# the distance between the chin and the tip of the nose. A value of 0.2 draws
-# the line at 20% of that distance below the chin.
-CHIN_LINE_OFFSET_FACTOR = 0.4
-
-# Track time when hand first enters too-close zone
-too_close_start = None
+# Lower beard boundary below the chin, relative to the nose-to-chin distance.
+# A full distance includes the lower beard without extending into the lap.
+CHIN_LINE_OFFSET_FACTOR = 1.0
 
 try:
     while True:
@@ -145,6 +206,9 @@ try:
         if not success:
             print("Camera frame read failed; stopping Beard Guard.", file=sys.stderr, flush=True)
             break
+
+        if (frame.shape[1], frame.shape[0]) != (PROCESSING_WIDTH, PROCESSING_HEIGHT):
+            frame = cv2.resize(frame, (PROCESSING_WIDTH, PROCESSING_HEIGHT), interpolation=cv2.INTER_LINEAR)
 
         # Flip image horizontally and convert to RGB
         frame = cv2.flip(frame, 1)
@@ -157,7 +221,7 @@ try:
         # Default marker color and hand position validity
         hand_marker_color = (0, 0, 255)  # red
         hand_valid = False
-        hand_too_close = False  # missing face/hand tracking must release the blackout
+        hand_too_close = False
 
         if face_results.multi_face_landmarks and hand_results.multi_hand_landmarks:
             face_landmarks = face_results.multi_face_landmarks[0]
@@ -211,13 +275,8 @@ try:
                 hand_too_close = dist < threshold
 
         now = time.monotonic()
-        blackout_active = False
-        if hand_too_close:
-            if too_close_start is None:
-                too_close_start = now
-            blackout_active = now - too_close_start >= TRIGGER_HOLD_DURATION
-        else:
-            too_close_start = None
+        blackout_active = warning_debouncer.update(hand_too_close, now=now)
+        if not hand_too_close:
             stop_alarm()
 
         # Refresh every frame, not just when a sound starts. Audio cooldowns must
@@ -237,7 +296,8 @@ try:
                         cv2.FONT_HERSHEY_SIMPLEX, 3, (0, 0, 255), 10)
 
         # Display the annotated frame
-        cv2.imshow('Beard Guard', frame)
+        cv2.imshow(APP_NAME, frame)
+        configure_linux_window_identity()
 
         # Escape may reach the preview before the overlay owns keyboard input.
         # During a warning it must dismiss, not terminate camera detection.
@@ -247,7 +307,7 @@ try:
                 screen_blackout_controller.dismiss()
             else:
                 break
-        if cv2.getWindowProperty('Beard Guard', cv2.WND_PROP_VISIBLE) < 1:
+        if cv2.getWindowProperty(APP_NAME, cv2.WND_PROP_VISIBLE) < 1:
             break
 finally:
     screen_blackout_controller.shutdown()

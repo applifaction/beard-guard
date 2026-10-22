@@ -29,7 +29,10 @@ The script should be configurable through environment variables:
 - `BEARDGUARD_CAMERA_DEVICES`: optional space-separated camera devices; defaults to `/dev/video*`.
 - `BEARDGUARD_WATCHDOG_POLL_SECONDS`: polling interval; default `5`.
 - `BEARDGUARD_RESUME_DELAY_SECONDS`: free-camera stability period before restart; default `20`.
+- `BEARDGUARD_STARTUP_RETRY_SECONDS`: retry delay after an automatically launched login instance exits early; default `10`.
+- `BEARDGUARD_STARTUP_FAILURE_WINDOW_SECONDS`: maximum runtime still treated as an early login-start failure; default `120`.
 - `BEARDGUARD_START_ON_LOGIN`: whether to start Beard Guard at login if no camera is in use; default `1`.
+- `BEARDGUARD_NO_CALL_RESTART_SECONDS`: fallback restart timeout after Beard Guard is stopped but no other process starts using the camera; default `300` seconds. Set to `0` to disable this fallback.
 
 ### Ubuntu desktop/autostart integration
 
@@ -57,9 +60,10 @@ If neither `fuser` nor `lsof` is available, the watchdog should fail clearly wit
 ## Edge cases
 
 - If no `/dev/video*` device exists, the watchdog waits and retries.
-- If Beard Guard is stopped and no call ever uses the camera, the watchdog stays in `waiting_for_call` instead of immediately restarting it.
+- If Beard Guard is stopped and no call ever uses the camera, the watchdog waits in `waiting_for_call` and restarts Beard Guard after `BEARDGUARD_NO_CALL_RESTART_SECONDS`.
 - If a call briefly releases and reacquires the camera, the resume delay prevents premature restart.
-- If Beard Guard crashes while it was supposed to be running, the watchdog may restart it after the normal checks, but it should not fight an intentional manual stop before a call.
+- If the login-started Beard Guard exits within `BEARDGUARD_STARTUP_FAILURE_WINDOW_SECONDS`, the watchdog retries after `BEARDGUARD_STARTUP_RETRY_SECONDS` rather than applying the five-minute intentional-stop delay.
+- If Beard Guard stops after a stable run or after a manual start, the watchdog preserves the normal no-call delay so it does not fight an intentional stop before a call.
 - If multiple cameras exist, any non-Beard-Guard use of any configured camera counts as camera activity.
 
 ## Testing plan
@@ -69,9 +73,10 @@ If neither `fuser` nor `lsof` is available, the watchdog should fail clearly wit
 3. Start the watchdog manually in a temporary test mode.
 4. Confirm initial startup behavior when the camera is free.
 5. Stop Beard Guard manually and confirm the watchdog does not immediately restart it.
-6. Simulate non-Beard-Guard camera use with a short Python/OpenCV holder process.
-7. Confirm the watchdog restarts Beard Guard only after the holder releases the camera and the resume delay passes.
-8. Confirm the restarted Beard Guard has `WM_CLASS=beardguard`, so GNOME can use the app icon.
+6. Confirm the fallback timeout restarts Beard Guard if no camera app starts.
+7. Simulate non-Beard-Guard camera use with a short Python/OpenCV holder process.
+8. Confirm the watchdog restarts Beard Guard only after the holder releases the camera and the resume delay passes.
+9. Confirm the restarted Beard Guard has `WM_CLASS=beardguard`, so GNOME can use the app icon.
 
 ## Out of scope
 
