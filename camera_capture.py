@@ -51,7 +51,7 @@ def build_ffmpeg_command(
 
 
 class FFmpegCameraCapture:
-    """Read the newest V4L2 frame through FFmpeg without OpenCV's xHCI-unsafe queueing."""
+    """Continuously drain FFmpeg frames while exposing only the newest V4L2 image."""
 
     def __init__(
         self,

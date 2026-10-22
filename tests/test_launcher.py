@@ -10,6 +10,9 @@ import unittest
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 LAUNCHER = PROJECT_DIR / "beardguard.sh"
 INSTALLER = PROJECT_DIR / "scripts" / "install-ubuntu-desktop-entry.sh"
+CAMERA_WORKAROUND_INSTALLER = (
+    PROJECT_DIR / "scripts" / "install-bison-camera-workaround.sh"
+)
 
 
 class BeardGuardInstallerTests(unittest.TestCase):
@@ -51,6 +54,36 @@ class BeardGuardInstallerTests(unittest.TestCase):
                 "--user enable --now beardguard-watchdog.service",
                 systemctl_calls,
             )
+
+    def test_camera_workaround_installer_persists_bandwidth_quirk_idempotently(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = Path(tmp) / "beardguard-webcam.conf"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "BEARDGUARD_EFFECTIVE_UID": "0",
+                    "BEARDGUARD_SKIP_CAMERA_CHECK": "1",
+                    "BEARDGUARD_UVC_CONFIG_PATH": str(config),
+                }
+            )
+
+            subprocess.run(
+                [str(CAMERA_WORKAROUND_INSTALLER)],
+                env=env,
+                check=True,
+                timeout=30,
+            )
+            first_content = config.read_text()
+            subprocess.run(
+                [str(CAMERA_WORKAROUND_INSTALLER)],
+                env=env,
+                check=True,
+                timeout=30,
+            )
+
+            self.assertIn("options uvcvideo nodrop=0 quirks=0x80", first_content)
+            self.assertEqual(config.read_text(), first_content)
+            self.assertEqual(list(config.parent.glob("*.bak-*")), [])
 
 
 class BeardGuardLauncherTests(unittest.TestCase):

@@ -93,6 +93,16 @@ After testing, install the desktop launcher and camera-aware autostart watchdog:
 
 The installer enables `beardguard-watchdog.service` as a restartable systemd user service for the graphical session. The watchdog yields the webcam to video-call applications and permits one automatic Beardguard retry after a completed xHCI recovery. A repeated xHCI fault on the same kernel within ten minutes stays quarantined instead of causing a USB-controller reset loop. Check the supervisor with `systemctl --user status beardguard-watchdog.service`. Do not add `beard_guard.py` as a second direct autostart entry; that would bypass camera arbitration and the single-instance launcher.
 
+#### Bison FHD Camera on current Linux kernels
+
+The built-in Bison `5986:1193` camera can overstate its isochronous payload requirement and make `uvcvideo` select an unstable endpoint alternate setting. Install the targeted host workaround without downgrading the kernel:
+
+```bash
+./scripts/install-bison-camera-workaround.sh
+```
+
+The installer requests administrator approval, writes `options uvcvideo nodrop=0 quirks=0x80` to `/etc/modprobe.d/beardguard-webcam.conf`, and asks for a restart when the setting is not active yet. Verify the active value with `cat /sys/module/uvcvideo/parameters/quirks`; `128` means `UVC_QUIRK_FIX_BANDWIDTH` is enabled.
+
 ## Configuration
 
 Edit the constants in [`beard_guard.py`](beard_guard.py), then restart the application.
